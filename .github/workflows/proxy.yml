@@ -1,0 +1,162 @@
+name: Predictable Code Runner
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        required: false
+        type: string
+        default: "verify"
+        description: "init = first-time setup, verify = PR verification"
+      pr_number:
+        required: false
+        type: string
+        default: ""
+      repository:
+        required: false
+        type: string
+        default: ""
+      triggered_by_comment:
+        required: false
+        type: string
+        default: "false"
+      comment:
+        required: false
+        type: string
+        default: ""
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.mode == 'init' && github.ref || format('refs/pull/{0}/head', inputs.pr_number) }}
+          fetch-depth: 0
+
+      - name: Install Predictable Code CLI
+        run: |
+          RELEASES_REPO="predictable-machines/predictable-code-releases"
+          DOWNLOAD_URL=$(curl -s \
+            "https://api.github.com/repos/${RELEASES_REPO}/releases/latest" \
+            | grep -o '"browser_download_url": *"[^"]*predictable-linux-x64"' \
+            | head -1 | cut -d'"' -f4)
+          if [ -z "$DOWNLOAD_URL" ]; then
+            echo "::error::Failed to find latest Predictable Code release"
+            exit 1
+          fi
+          curl -sL "$DOWNLOAD_URL" -o /tmp/predictable
+          chmod +x /tmp/predictable
+          sudo mv /tmp/predictable /usr/local/bin/predictable
+          echo "Predictable Code CLI installed from release."
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Check API key
+        id: check_api_key
+        if: inputs.mode == 'init'
+        run: |
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "has_key=false" >> $GITHUB_OUTPUT
+            echo "::warning::ANTHROPIC_API_KEY secret is not configured. Skipping spec inference."
+          else
+            echo "has_key=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Initialize project
+        if: inputs.mode == 'init'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HAS_KEY: ${{ steps.check_api_key.outputs.has_key }}
+        run: |
+          if [ "$HAS_KEY" = "true" ]; then
+            BRANCH="predictable-code/init"
+          else
+            BRANCH="predictable-code/setup"
+          fi
+          git config user.name "predictable-code[bot]"
+          git config user.email "predictable-code[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          REPO_NAME=$(basename "$(pwd)")
+          mkdir -p .predictable-code
+          cat > .predictable-code/project.json <<PJEOF
+          {
+            "name": "$REPO_NAME",
+            "codePaths": [],
+            "constraints": [],
+            "aiEngine": "claudeCode",
+            "sourceExtensions": [],
+            "mode": "yolo"
+          }
+          PJEOF
+          if [ "$HAS_KEY" = "true" ]; then
+            predictable specs infer . --verbose
+          fi
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes detected."
+            exit 0
+          fi
+          git add -A .predictable-code/
+          git commit -m "chore: initialize Predictable Code project"
+          git push origin "$BRANCH"
+
+      - name: Check for specs directory
+        id: check_specs
+        if: inputs.mode != 'init'
+        run: |
+          if [ -d ".predictable-code" ]; then
+            echo "has_specs=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_specs=false" >> $GITHUB_OUTPUT
+            echo "::notice::No .predictable-code directory found. Skipping verification."
+          fi
+
+      - name: Compile and verify specs
+        id: verify_specs
+        if: inputs.mode != 'init' && steps.check_specs.outputs.has_specs == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          COMPILE_OUTPUT=$(predictable specs compile --json 2>&1) || true
+          OUT_OF_SYNC=$(predictable specs out-of-sync --json 2>&1) || true
+          mkdir -p /tmp/verify-results
+          cat > /tmp/verify-results/results.json <<VJEOF
+          {
+            "pr_number": "${{ inputs.pr_number }}",
+            "has_specs": true,
+            "compile": $COMPILE_OUTPUT,
+            "sync": $OUT_OF_SYNC
+          }
+          VJEOF
+
+      - name: Save no-specs result
+        if: inputs.mode != 'init' && steps.check_specs.outputs.has_specs == 'false'
+        run: |
+          mkdir -p /tmp/verify-results
+          cat > /tmp/verify-results/results.json <<VJEOF
+          {
+            "pr_number": "${{ inputs.pr_number }}",
+            "has_specs": false
+          }
+          VJEOF
+
+      - name: Upload verification results
+        if: inputs.mode != 'init' && inputs.pr_number != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-results
+          path: /tmp/verify-results/results.json
+          retention-days: 1
