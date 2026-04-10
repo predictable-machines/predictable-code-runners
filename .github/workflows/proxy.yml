@@ -30,7 +30,7 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -41,19 +41,10 @@ jobs:
 
       - name: Install Predictable Code CLI
         run: |
-          RELEASES_REPO="predictable-machines/predictable-code-releases"
-          DOWNLOAD_URL=$(curl -s \
-            "https://api.github.com/repos/${RELEASES_REPO}/releases/latest" \
-            | grep -o '"browser_download_url": *"[^"]*predictable-linux-x64"' \
-            | head -1 | cut -d'"' -f4)
-          if [ -z "$DOWNLOAD_URL" ]; then
-            echo "::error::Failed to find latest Predictable Code release"
-            exit 1
-          fi
-          curl -sL "$DOWNLOAD_URL" -o /tmp/predictable
-          chmod +x /tmp/predictable
-          sudo mv /tmp/predictable /usr/local/bin/predictable
-          echo "Predictable Code CLI installed from release."
+          gunzip -k bin/predictable-darwin-arm64.gz
+          chmod +x bin/predictable-darwin-arm64
+          sudo mv bin/predictable-darwin-arm64 /usr/local/bin/predictable
+          echo "Predictable Code CLI installed from local binary."
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
