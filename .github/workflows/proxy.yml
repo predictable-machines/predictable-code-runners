@@ -44,8 +44,7 @@ jobs:
           RELEASES_REPO="predictable-machines/predictable-code-releases"
           DOWNLOAD_URL=$(curl -s \
             "https://api.github.com/repos/${RELEASES_REPO}/releases/latest" \
-            | grep -o '"browser_download_url": *"[^"]*predictable-linux-x64"' \
-            | head -1 | cut -d'"' -f4)
+            | jq -r '.assets[] | select(.name == "predictable-linux-x64") | .browser_download_url')
           if [ -z "$DOWNLOAD_URL" ]; then
             echo "::error::Failed to find latest Predictable Code release"
             exit 1
