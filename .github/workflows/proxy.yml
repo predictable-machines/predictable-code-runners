@@ -95,18 +95,7 @@ jobs:
           git config user.email "predictable-code[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           REPO_NAME=$(basename "$(pwd)")
-          mkdir -p .predictable-code
-          cat > .predictable-code/project.json <<PJEOF
-          {
-            "name": "$REPO_NAME",
-            "codePaths": [],
-            "constraints": [],
-            "guidelines": [],
-            "aiEngine": "claudeCode",
-            "sourceExtensions": [],
-            "mode": "yolo"
-          }
-          PJEOF
+          predictable init "$REPO_NAME" --adapter claude
           if [ "$HAS_KEY" = "true" ]; then
             predictable specs infer . --verbose
           fi
@@ -140,14 +129,9 @@ jobs:
           OUT_OF_SYNC=$(predictable specs out-of-sync --json 2>&1) || true
           mkdir -p /tmp/verify-results
           echo "$COMPILE_OUTPUT" > /tmp/verify-results/compile.json
-          cat > /tmp/verify-results/results.json <<VJEOF
-          {
-            "pr_number": "${{ inputs.pr_number }}",
-            "has_specs": true,
-            "compile": $COMPILE_OUTPUT,
-            "sync": $OUT_OF_SYNC
-          }
-          VJEOF
+          printf '{"pr_number":"%s","has_specs":true,"compile":%s,"sync":%s}\n' \
+            "${{ inputs.pr_number }}" "$COMPILE_OUTPUT" "$OUT_OF_SYNC" \
+            > /tmp/verify-results/results.json
 
       - name: Run formal verification and generate SARIF
         id: sarif_generation
@@ -189,12 +173,9 @@ jobs:
         if: inputs.mode != 'init' && steps.check_specs.outputs.has_specs == 'false'
         run: |
           mkdir -p /tmp/verify-results
-          cat > /tmp/verify-results/results.json <<VJEOF
-          {
-            "pr_number": "${{ inputs.pr_number }}",
-            "has_specs": false
-          }
-          VJEOF
+          printf '{"pr_number":"%s","has_specs":false}\n' \
+            "${{ inputs.pr_number }}" \
+            > /tmp/verify-results/results.json
 
       - name: Upload verification results
         if: inputs.mode != 'init' && inputs.pr_number != ''
