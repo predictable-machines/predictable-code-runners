@@ -126,11 +126,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          COMPILE_OUTPUT=$(predictable specs compile --json 2>&1) || {
+          COMPILE_OUTPUT=$(predictable specs compile --json) || {
             echo "::error::specs compile failed: $COMPILE_OUTPUT"
             exit 1
           }
-          OUT_OF_SYNC=$(predictable specs out-of-sync --json 2>&1) || {
+          OUT_OF_SYNC=$(predictable specs out-of-sync --json) || {
             echo "::error::specs out-of-sync failed: $OUT_OF_SYNC"
             exit 1
           }
