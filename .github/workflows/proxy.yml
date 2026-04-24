@@ -120,8 +120,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          COMPILE_OUTPUT=$(predictable specs compile --json 2>&1) || true
-          OUT_OF_SYNC=$(predictable specs out-of-sync --json 2>&1) || true
+          COMPILE_OUTPUT=$(predictable specs compile --json) || {
+            echo "::error::specs compile failed: $COMPILE_OUTPUT"
+            exit 1
+          }
+          OUT_OF_SYNC=$(predictable specs out-of-sync --json) || {
+            echo "::error::specs out-of-sync failed: $OUT_OF_SYNC"
+            exit 1
+          }
           mkdir -p /tmp/verify-results
           echo "$COMPILE_OUTPUT" > /tmp/verify-results/compile.json
           printf '{"pr_number":"%s","has_specs":true,"compile":%s,"sync":%s}\n' \
@@ -136,7 +142,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           mkdir -p /tmp/sarif-results
-          SPEC_IDS=$(jq -r '.compiled[]?.specId // empty' /tmp/verify-results/compile.json 2>/dev/null || true)
+          SPEC_IDS=$(jq -r '.compiled[]?.specId // empty' /tmp/verify-results/compile.json)
           if [ -z "$SPEC_IDS" ]; then
             echo "No specs found for formal verification."
             echo "has_sarif=false" >> $GITHUB_OUTPUT
