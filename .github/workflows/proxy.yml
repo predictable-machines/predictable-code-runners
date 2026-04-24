@@ -7,7 +7,7 @@ on:
         required: false
         type: string
         default: "verify"
-        description: "init = first-time setup, verify = PR verification"
+        description: "init = first-time setup, verify = PR verification, reply = respond to mention"
       pr_number:
         required: false
         type: string
@@ -24,9 +24,23 @@ on:
         required: false
         type: string
         default: ""
+      comment_author:
+        required: false
+        type: string
+        default: ""
+      pr_description:
+        required: false
+        type: string
+        default: ""
+      comment_thread:
+        required: false
+        type: string
+        default: ""
     secrets:
       ANTHROPIC_API_KEY:
         required: false
+      RELEASES_TOKEN:
+        required: true
 
 jobs:
   verify:
@@ -42,14 +56,18 @@ jobs:
       - name: Install Predictable Code CLI
         run: |
           RELEASES_REPO="predictable-machines/predictable-code-releases"
-          DOWNLOAD_URL=$(curl -s \
+          ASSET_URL=$(curl -s \
+            -H "Authorization: Bearer ${{ secrets.RELEASES_TOKEN }}" \
             "https://api.github.com/repos/${RELEASES_REPO}/releases/latest" \
-            | jq -r '.assets[] | select(.name == "predictable-linux-x64") | .browser_download_url')
-          if [ -z "$DOWNLOAD_URL" ]; then
+            | jq -r '.assets[] | select(.name == "predictable-linux-x64") | .url')
+          if [ -z "$ASSET_URL" ]; then
             echo "::error::Failed to find latest Predictable Code release"
             exit 1
           fi
-          curl -sL "$DOWNLOAD_URL" -o /tmp/predictable
+          curl -sL \
+            -H "Authorization: Bearer ${{ secrets.RELEASES_TOKEN }}" \
+            -H "Accept: application/octet-stream" \
+            "$ASSET_URL" -o /tmp/predictable
           chmod +x /tmp/predictable
           sudo mv /tmp/predictable /usr/local/bin/predictable
           echo "Predictable Code CLI installed from release."
@@ -102,9 +120,67 @@ jobs:
           git commit -m "chore: initialize Predictable Code project"
           git push origin "$BRANCH"
 
+      - name: Reply to mention
+        if: inputs.mode == 'reply'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          INPUT_PR_DESCRIPTION: ${{ inputs.pr_description }}
+          INPUT_COMMENT_THREAD: ${{ inputs.comment_thread }}
+          INPUT_COMMENT_AUTHOR: ${{ inputs.comment_author }}
+          INPUT_COMMENT: ${{ inputs.comment }}
+          INPUT_REPOSITORY: ${{ inputs.repository }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY is not configured. Cannot reply to mention."
+            exit 0
+          fi
+
+          printf '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "You assist developers by answering questions they leave in GitHub pull request comments." \
+            "Rules:" \
+            "- Respond directly and concisely. No preamble." \
+            "- Use GitHub-flavored Markdown." \
+            "- If asked about verification results, refer only to what is already in the comment thread. Do not invent results." \
+            "- If asked to re-run verification, explain that verification runs automatically on every PR update." \
+            "- Do not reveal internal implementation details of the system." \
+            > /tmp/system_prompt.txt
+
+          printf '%s\n\n%s\n@%s wrote:\n%s' \
+            "$INPUT_PR_DESCRIPTION" \
+            "$INPUT_COMMENT_THREAD" \
+            "$INPUT_COMMENT_AUTHOR" \
+            "$INPUT_COMMENT" > /tmp/user_message.txt
+
+          RESPONSE=$(claude -p "$(cat /tmp/user_message.txt)" \
+            --system-prompt "$(cat /tmp/system_prompt.txt)" \
+            --model claude-sonnet-4-5 \
+            --max-turns 1 \
+            --allowedTools none \
+            --bare 2>&1)
+
+          if [ -z "$RESPONSE" ]; then
+            echo "::error::Claude returned an empty response"
+            exit 1
+          fi
+
+          mkdir -p /tmp/reply-result
+          jq -n --arg pr_number "$INPUT_PR_NUMBER" --arg body "$RESPONSE" \
+            '{"pr_number": $pr_number, "body": $body}' \
+            > /tmp/reply-result/reply.json
+
+      - name: Upload reply result
+        if: inputs.mode == 'reply'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reply-result
+          path: /tmp/reply-result/reply.json
+          retention-days: 1
+
       - name: Check for specs directory
         id: check_specs
-        if: inputs.mode != 'init'
+        if: inputs.mode != 'init' && inputs.mode != 'reply'
         run: |
           if [ -d ".predictable-code" ]; then
             echo "has_specs=true" >> $GITHUB_OUTPUT
@@ -115,7 +191,7 @@ jobs:
 
       - name: Compile and verify specs
         id: verify_specs
-        if: inputs.mode != 'init' && steps.check_specs.outputs.has_specs == 'true'
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.check_specs.outputs.has_specs == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -136,7 +212,7 @@ jobs:
 
       - name: Run formal verification and generate SARIF
         id: sarif_generation
-        if: inputs.mode != 'init' && steps.check_specs.outputs.has_specs == 'true'
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.check_specs.outputs.has_specs == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -164,14 +240,14 @@ jobs:
           fi
 
       - name: Upload SARIF to GitHub Code Scanning
-        if: inputs.mode != 'init' && steps.sarif_generation.outputs.has_sarif == 'true'
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.sarif_generation.outputs.has_sarif == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: /tmp/sarif-results
           category: predictable-code-verification
 
       - name: Save no-specs result
-        if: inputs.mode != 'init' && steps.check_specs.outputs.has_specs == 'false'
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.check_specs.outputs.has_specs == 'false'
         run: |
           mkdir -p /tmp/verify-results
           printf '{"pr_number":"%s","has_specs":false}\n' \
@@ -179,7 +255,7 @@ jobs:
             > /tmp/verify-results/results.json
 
       - name: Upload verification results
-        if: inputs.mode != 'init' && inputs.pr_number != ''
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.pr_number != ''
         uses: actions/upload-artifact@v4
         with:
           name: verify-results
