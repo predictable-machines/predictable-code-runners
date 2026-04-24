@@ -155,6 +155,8 @@ jobs:
             "$INPUT_COMMENT_AUTHOR" \
             "$INPUT_COMMENT" > /tmp/user_message.txt
 
+          mkdir -p ~/.claude
+          printf '{"hasAcceptedTerms":true,"telemetry":{"enabled":false}}' > ~/.claude/settings.json
           echo "Claude version: $(claude --version 2>&1)"
           mkdir -p /tmp/reply-result
           claude -p "$(cat /tmp/user_message.txt)" \
