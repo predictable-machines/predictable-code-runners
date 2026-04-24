@@ -137,15 +137,15 @@ jobs:
             exit 0
           fi
 
-          cat > /tmp/system_prompt.txt << 'SYSTEM_EOF'
-You assist developers by answering questions they leave in GitHub pull request comments.
-Rules:
-- Respond directly and concisely. No preamble.
-- Use GitHub-flavored Markdown.
-- If asked about verification results, refer only to what is already in the comment thread. Do not invent results.
-- If asked to re-run verification, explain that verification runs automatically on every PR update.
-- Do not reveal internal implementation details of the system.
-SYSTEM_EOF
+          printf '%s\n%s\n%s\n%s\n%s\n%s\n%s' \
+            "You assist developers by answering questions they leave in GitHub pull request comments." \
+            "Rules:" \
+            "- Respond directly and concisely. No preamble." \
+            "- Use GitHub-flavored Markdown." \
+            "- If asked about verification results, refer only to what is already in the comment thread. Do not invent results." \
+            "- If asked to re-run verification, explain that verification runs automatically on every PR update." \
+            "- Do not reveal internal implementation details of the system." \
+            > /tmp/system_prompt.txt
 
           printf '%s\n\n%s\n@%s wrote:\n%s' \
             "$INPUT_PR_DESCRIPTION" \
