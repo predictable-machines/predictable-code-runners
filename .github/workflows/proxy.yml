@@ -125,29 +125,36 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          INPUT_PR_DESCRIPTION: ${{ inputs.pr_description }}
+          INPUT_COMMENT_THREAD: ${{ inputs.comment_thread }}
+          INPUT_COMMENT_AUTHOR: ${{ inputs.comment_author }}
+          INPUT_COMMENT: ${{ inputs.comment }}
+          INPUT_REPOSITORY: ${{ inputs.repository }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
         run: |
-          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::warning::ANTHROPIC_API_KEY is not configured. Cannot reply to mention."
             exit 0
           fi
 
-          SYSTEM_PROMPT="You are Predictable Code, a spec-driven verification assistant integrated into GitHub pull requests.
-          You help developers understand verification results, clarify spec requirements, and answer questions about the Predictable Code system.
-          Rules:
-          - Respond directly and concisely. No preamble.
-          - Use GitHub-flavored Markdown.
-          - If asked about verification results, refer only to what is already in the comment thread. Do not invent results.
-          - If asked to re-run verification, explain that verification runs automatically on every PR update.
-          - Do not reveal internal implementation details of the Predictable Code system."
+          cat > /tmp/system_prompt.txt << 'SYSTEM_EOF'
+You assist developers by answering questions they leave in GitHub pull request comments.
+Rules:
+- Respond directly and concisely. No preamble.
+- Use GitHub-flavored Markdown.
+- If asked about verification results, refer only to what is already in the comment thread. Do not invent results.
+- If asked to re-run verification, explain that verification runs automatically on every PR update.
+- Do not reveal internal implementation details of the system.
+SYSTEM_EOF
 
-          USER_MESSAGE="${{ inputs.pr_description }}
+          printf '%s\n\n%s\n@%s wrote:\n%s' \
+            "$INPUT_PR_DESCRIPTION" \
+            "$INPUT_COMMENT_THREAD" \
+            "$INPUT_COMMENT_AUTHOR" \
+            "$INPUT_COMMENT" > /tmp/user_message.txt
 
-          ${{ inputs.comment_thread }}
-          @${{ inputs.comment_author }} wrote:
-          ${{ inputs.comment }}"
-
-          RESPONSE=$(claude -p "$USER_MESSAGE" \
-            --system-prompt "$SYSTEM_PROMPT" \
+          RESPONSE=$(claude -p "$(cat /tmp/user_message.txt)" \
+            --system-prompt "$(cat /tmp/system_prompt.txt)" \
             --model claude-sonnet-4-5 \
             --max-turns 1 \
             --allowedTools none \
@@ -158,8 +165,7 @@ jobs:
             exit 1
           fi
 
-          # Post the response as a PR comment via the GitHub API
-          PR_COMMENT_URL="https://api.github.com/repos/${{ inputs.repository }}/issues/${{ inputs.pr_number }}/comments"
+          PR_COMMENT_URL="https://api.github.com/repos/${INPUT_REPOSITORY}/issues/${INPUT_PR_NUMBER}/comments"
           curl -s -X POST "$PR_COMMENT_URL" \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Accept: application/vnd.github+json" \
