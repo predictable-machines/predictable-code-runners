@@ -125,6 +125,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          NO_UPDATE_NOTIFIER: "1"
           INPUT_PR_DESCRIPTION: ${{ inputs.pr_description }}
           INPUT_COMMENT_THREAD: ${{ inputs.comment_thread }}
           INPUT_COMMENT_AUTHOR: ${{ inputs.comment_author }}
@@ -153,6 +155,7 @@ jobs:
             "$INPUT_COMMENT_AUTHOR" \
             "$INPUT_COMMENT" > /tmp/user_message.txt
 
+          echo "Claude version: $(claude --version 2>&1)"
           mkdir -p /tmp/reply-result
           claude -p "$(cat /tmp/user_message.txt)" \
             --system-prompt "$(cat /tmp/system_prompt.txt)" \
