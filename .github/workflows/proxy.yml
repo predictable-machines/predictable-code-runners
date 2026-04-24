@@ -153,19 +153,26 @@ jobs:
             "$INPUT_COMMENT_AUTHOR" \
             "$INPUT_COMMENT" > /tmp/user_message.txt
 
-          RESPONSE=$(claude -p "$(cat /tmp/user_message.txt)" \
+          mkdir -p /tmp/reply-result
+          claude -p "$(cat /tmp/user_message.txt)" \
             --system-prompt "$(cat /tmp/system_prompt.txt)" \
             --model claude-sonnet-4-5 \
             --max-turns 1 \
             --allowedTools none \
-            --bare 2>&1)
+            --output-format text \
+            > /tmp/reply-result-raw.txt 2>/tmp/claude-stderr.txt || {
+            echo "::error::Claude CLI failed (exit code $?)"
+            echo "stderr: $(cat /tmp/claude-stderr.txt)"
+            exit 1
+          }
 
+          RESPONSE=$(cat /tmp/reply-result-raw.txt)
           if [ -z "$RESPONSE" ]; then
             echo "::error::Claude returned an empty response"
+            echo "stderr: $(cat /tmp/claude-stderr.txt)"
             exit 1
           fi
 
-          mkdir -p /tmp/reply-result
           jq -n --arg pr_number "$INPUT_PR_NUMBER" --arg body "$RESPONSE" \
             '{"pr_number": $pr_number, "body": $body}' \
             > /tmp/reply-result/reply.json
