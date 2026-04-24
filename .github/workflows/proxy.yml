@@ -104,6 +104,7 @@ jobs:
             exit 0
           fi
           git add -A .predictable-code/
+          git add -A specs/ 2>/dev/null || true
           git commit -m "chore: initialize Predictable Code project"
           git push origin "$BRANCH"
 
