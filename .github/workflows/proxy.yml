@@ -79,7 +79,7 @@ jobs:
 
       - name: Install Anthropic SDK
         if: inputs.mode == 'reply' || inputs.mode == 'init'
-        run: npm install -g @anthropic-ai/sdk
+        run: npm install --prefix /tmp/npm-pkgs @anthropic-ai/sdk
 
       - name: Check API key
         id: check_api_key
@@ -125,6 +125,7 @@ jobs:
         if: inputs.mode == 'reply'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NODE_PATH: /tmp/npm-pkgs/node_modules
           INPUT_PR_DESCRIPTION: ${{ inputs.pr_description }}
           INPUT_COMMENT_THREAD: ${{ inputs.comment_thread }}
           INPUT_COMMENT_AUTHOR: ${{ inputs.comment_author }}
