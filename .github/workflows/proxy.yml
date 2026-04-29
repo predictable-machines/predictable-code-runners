@@ -215,10 +215,57 @@ jobs:
             echo "::error::specs out-of-sync failed: $OUT_OF_SYNC"
             exit 1
           }
+          # Build codeLocations map: { "SPEC-ID": [{file, startLine, endLine, declaration}] }
+          # Reads compiled spec JSON files already on disk from the compile step.
+          # Only includes specs that appear in the out-of-sync list.
+          CODE_LOCATIONS=$(node -e "
+            const fs = require('fs');
+            const path = require('path');
+            let sync;
+            try { sync = JSON.parse(process.argv[1]); } catch(e) { process.stdout.write('{}'); process.exit(0); }
+            const specs = (sync && sync.specs) ? sync.specs : [];
+            const compiledDir = '.predictable-code/specs/.compiled';
+            const result = {};
+            for (const spec of specs) {
+              const jsonPath = path.join(compiledDir, spec.id + '.json');
+              try {
+                const doc = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+                const locs = [];
+                const items = [...(doc.requirements || []), ...(doc.guidelines || [])];
+                for (const item of items) {
+                  if (!item.codeLocationsFile) continue;
+                  try {
+                    const raw = fs.readFileSync(item.codeLocationsFile, 'utf8');
+                    let name = null, file = null, start = null, end = null;
+                    for (const line of raw.split('\n')) {
+                      const t = line.trim();
+                      if (t.startsWith('### ')) {
+                        if (name && file && start !== null)
+                          locs.push({ file, startLine: start, endLine: end ?? start, declaration: name });
+                        name = t.replace(/^###\s+\`?/, '').replace(/\`?\s*$/, '');
+                        file = null; start = null; end = null;
+                      } else if (t.startsWith('- **File:**')) {
+                        const m = t.match(/\[([^\]]+)\]/);
+                        file = m ? m[1] : t.replace('- **File:**', '').trim();
+                      } else if (t.startsWith('- **Lines:**')) {
+                        const r = t.replace('- **Lines:**', '').trim().split('-');
+                        start = parseInt(r[0], 10); end = r[1] ? parseInt(r[1], 10) : start;
+                      }
+                    }
+                    if (name && file && start !== null)
+                      locs.push({ file, startLine: start, endLine: end ?? start, declaration: name });
+                  } catch(e) {}
+                }
+                if (locs.length > 0) result[spec.id] = locs;
+              } catch(e) {}
+            }
+            process.stdout.write(JSON.stringify(result));
+          " "$OUT_OF_SYNC" 2>/dev/null) || CODE_LOCATIONS="{}"
+
           mkdir -p /tmp/verify-results
           echo "$COMPILE_OUTPUT" > /tmp/verify-results/compile.json
-          printf '{"pr_number":"%s","has_specs":true,"compile":%s,"sync":%s}\n' \
-            "${{ inputs.pr_number }}" "$COMPILE_OUTPUT" "$OUT_OF_SYNC" \
+          printf '{"pr_number":"%s","has_specs":true,"compile":%s,"sync":%s,"codeLocations":%s}\n' \
+            "${{ inputs.pr_number }}" "$COMPILE_OUTPUT" "$OUT_OF_SYNC" "$CODE_LOCATIONS" \
             > /tmp/verify-results/results.json
 
       - name: Run formal verification and generate SARIF
