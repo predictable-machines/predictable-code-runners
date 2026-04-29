@@ -270,7 +270,7 @@ jobs:
 
       - name: Run formal verification and generate SARIF
         id: sarif_generation
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.check_specs.outputs.has_specs == 'true'
+        if: inputs.mode == 'formalize' && steps.check_specs.outputs.has_specs == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -298,7 +298,7 @@ jobs:
           fi
 
       - name: Upload SARIF to GitHub Code Scanning
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.sarif_generation.outputs.has_sarif == 'true'
+        if: inputs.mode == 'formalize' && steps.sarif_generation.outputs.has_sarif == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: /tmp/sarif-results
