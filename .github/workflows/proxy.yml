@@ -108,7 +108,7 @@ jobs:
           git config user.email "predictable-code[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           REPO_NAME=$(basename "$(pwd)")
-          predictable init "$REPO_NAME" --adapter claude
+          predictable init "$REPO_NAME" --adapter claude --accept-config-suggestions
           if [ "$HAS_KEY" = "true" ]; then
             predictable specs infer . --verbose
           fi
