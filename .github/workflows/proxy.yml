@@ -7,7 +7,7 @@ on:
         required: false
         type: string
         default: "verify"
-        description: "init = first-time setup, verify = PR verification, reply = respond to mention"
+        description: "init = first-time setup, verify = PR verification, reply = respond to mention, sync = update specs to match code, formalize = run formal verification"
       pr_number:
         required: false
         type: string
@@ -189,9 +189,45 @@ jobs:
           path: /tmp/reply-result/reply.json
           retention-days: 1
 
+      - name: Sync specs to code
+        if: inputs.mode == 'sync'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning::ANTHROPIC_API_KEY is not configured. Cannot run sync."
+            exit 1
+          fi
+          if [ -z "${{ inputs.pr_number }}" ]; then
+            echo "::error::pr_number is required for mode=sync"
+            exit 1
+          fi
+          PR_BRANCH=$(curl -s \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ inputs.repository }}/pulls/${{ inputs.pr_number }}" \
+            | jq -r '.head.ref')
+          if [ -z "$PR_BRANCH" ] || [ "$PR_BRANCH" = "null" ]; then
+            echo "::error::Could not resolve branch for PR ${{ inputs.pr_number }}"
+            exit 1
+          fi
+          git config user.name "predictable-code[bot]"
+          git config user.email "predictable-code[bot]@users.noreply.github.com"
+          git checkout -b "$PR_BRANCH" --track "origin/$PR_BRANCH" 2>/dev/null \
+            || git checkout "$PR_BRANCH"
+          predictable specs sync --verbose
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No spec changes after sync."
+            exit 0
+          fi
+          git add -A specs/ .predictable-code/specs/ 2>/dev/null || true
+          git commit -m "chore(specs): sync specs to code via Predictable Code"
+          git push origin "$PR_BRANCH"
+
       - name: Check for specs directory
         id: check_specs
-        if: inputs.mode != 'init' && inputs.mode != 'reply'
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync'
         run: |
           if [ -d ".predictable-code" ]; then
             echo "has_specs=true" >> $GITHUB_OUTPUT
@@ -202,7 +238,7 @@ jobs:
 
       - name: Compile and verify specs
         id: verify_specs
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.check_specs.outputs.has_specs == 'true'
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync' && steps.check_specs.outputs.has_specs == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -223,7 +259,7 @@ jobs:
 
       - name: Run formal verification and generate SARIF
         id: sarif_generation
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.check_specs.outputs.has_specs == 'true'
+        if: inputs.mode == 'formalize' && steps.check_specs.outputs.has_specs == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -251,14 +287,14 @@ jobs:
           fi
 
       - name: Upload SARIF to GitHub Code Scanning
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.sarif_generation.outputs.has_sarif == 'true'
+        if: inputs.mode == 'formalize' && steps.sarif_generation.outputs.has_sarif == 'true'
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: /tmp/sarif-results
           category: predictable-code-verification
 
       - name: Save no-specs result
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && steps.check_specs.outputs.has_specs == 'false'
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync' && steps.check_specs.outputs.has_specs == 'false'
         run: |
           mkdir -p /tmp/verify-results
           printf '{"pr_number":"%s","has_specs":false}\n' \
@@ -266,7 +302,7 @@ jobs:
             > /tmp/verify-results/results.json
 
       - name: Upload verification results
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.pr_number != ''
+        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync' && inputs.pr_number != ''
         uses: actions/upload-artifact@v4
         with:
           name: verify-results
