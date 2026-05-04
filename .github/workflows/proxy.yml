@@ -108,11 +108,21 @@ jobs:
           git config user.email "predictable-code[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
           REPO_NAME=$(basename "$(pwd)")
+          predictable init "$REPO_NAME" --adapter claude
           if [ "$HAS_KEY" = "true" ]; then
-            predictable init "$REPO_NAME" --adapter claude --accept-config-suggestions
-            predictable specs infer . --verbose
-          else
-            predictable init "$REPO_NAME" --adapter claude
+            SOURCE_EXTS=$(find . -not -path './.git/*' -not -path './.predictable-code/*' \
+              -type f -name '*.*' \
+              | sed 's/.*\.//' \
+              | grep -E '^[a-zA-Z0-9]+$' \
+              | grep -vE '^(md|txt|json|yaml|yml|toml|xml|gitignore|gitattributes|lock|sum|mod|env|cfg|conf|ini|log|sh)$' \
+              | sort -u \
+              | tr '\n' ',' \
+              | sed 's/,$//')
+            if [ -n "$SOURCE_EXTS" ]; then
+              predictable specs infer . --verbose --include-ext "$SOURCE_EXTS"
+            else
+              predictable specs infer . --verbose
+            fi
           fi
           if [ -z "$(git status --porcelain)" ]; then
             echo "No changes detected."
