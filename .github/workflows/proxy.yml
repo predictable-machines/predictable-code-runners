@@ -78,7 +78,7 @@ jobs:
           node-version: "24"
 
       - name: Install Anthropic SDK
-        if: inputs.mode == 'reply' || inputs.mode == 'init'
+        if: inputs.mode == 'reply'
         run: npm install --prefix /tmp/npm-pkgs @anthropic-ai/sdk
 
       - name: Check API key
@@ -91,6 +91,15 @@ jobs:
           else
             echo "has_key=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Install Claude CLI
+        if: (inputs.mode == 'init' && steps.check_api_key.outputs.has_key == 'true') || inputs.mode == 'sync'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          mkdir -p ~/.claude
+          echo '{"hasCompletedOnboarding": true}' > ~/.claude/settings.json
 
       - name: Initialize project
         if: inputs.mode == 'init'
