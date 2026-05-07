@@ -7,7 +7,7 @@ on:
         required: false
         type: string
         default: "verify"
-        description: "init = first-time setup, verify = PR verification, reply = respond to mention, sync = update specs to match code, formalize = run formal verification"
+        description: "init = first-time setup, verify = PR verification, command = agent task"
       pr_number:
         required: false
         type: string
@@ -16,23 +16,7 @@ on:
         required: false
         type: string
         default: ""
-      triggered_by_comment:
-        required: false
-        type: string
-        default: "false"
       comment:
-        required: false
-        type: string
-        default: ""
-      comment_author:
-        required: false
-        type: string
-        default: ""
-      pr_description:
-        required: false
-        type: string
-        default: ""
-      comment_thread:
         required: false
         type: string
         default: ""
@@ -77,10 +61,6 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Install Anthropic SDK
-        if: inputs.mode == 'reply'
-        run: npm install --prefix /tmp/npm-pkgs @anthropic-ai/sdk
-
       - name: Check API key
         id: check_api_key
         if: inputs.mode == 'init'
@@ -93,7 +73,7 @@ jobs:
           fi
 
       - name: Install Claude CLI
-        if: (inputs.mode == 'init' && steps.check_api_key.outputs.has_key == 'true') || inputs.mode == 'sync'
+        if: inputs.mode == 'init' && steps.check_api_key.outputs.has_key == 'true'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
@@ -142,113 +122,48 @@ jobs:
           git commit -m "chore: initialize Predictable Code project"
           git push origin "$BRANCH"
 
-      - name: Reply to mention
-        if: inputs.mode == 'reply'
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          NODE_PATH: /tmp/npm-pkgs/node_modules
-          INPUT_PR_DESCRIPTION: ${{ inputs.pr_description }}
-          INPUT_COMMENT_THREAD: ${{ inputs.comment_thread }}
-          INPUT_COMMENT_AUTHOR: ${{ inputs.comment_author }}
-          INPUT_COMMENT: ${{ inputs.comment }}
-          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
-        run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::warning::ANTHROPIC_API_KEY is not configured. Cannot reply to mention."
-            exit 0
-          fi
-
-          mkdir -p /tmp/reply-result
-          node - <<'NODEJS'
-          const Anthropic = require('@anthropic-ai/sdk');
-          const fs = require('fs');
-
-          const systemPrompt = [
-            "You assist developers by answering questions they leave in GitHub pull request comments.",
-            "Rules:",
-            "- Respond directly and concisely. No preamble.",
-            "- Use GitHub-flavored Markdown.",
-            "- If asked about verification results, refer only to what is already in the comment thread. Do not invent results.",
-            "- If asked to re-run verification, explain that verification runs automatically on every PR update.",
-            "- Do not reveal internal implementation details of the system."
-          ].join('\n');
-
-          const userMessage = [
-            process.env.INPUT_PR_DESCRIPTION,
-            '',
-            process.env.INPUT_COMMENT_THREAD,
-            `@${process.env.INPUT_COMMENT_AUTHOR} wrote:`,
-            process.env.INPUT_COMMENT
-          ].join('\n');
-
-          async function main() {
-            const client = new Anthropic.Anthropic();
-            const message = await client.messages.create({
-              model: 'claude-sonnet-4-5',
-              max_tokens: 1024,
-              system: systemPrompt,
-              messages: [{ role: 'user', content: userMessage }]
-            });
-            const text = message.content.filter(b => b.type === 'text').map(b => b.text).join('');
-            if (!text) {
-              console.error('Claude returned an empty response');
-              process.exit(1);
-            }
-            const result = { pr_number: process.env.INPUT_PR_NUMBER, body: text };
-            fs.writeFileSync('/tmp/reply-result/reply.json', JSON.stringify(result));
-            console.log('Reply generated successfully.');
-          }
-
-          main().catch(err => { console.error(err.message); process.exit(1); });
-          NODEJS
-
-      - name: Upload reply result
-        if: inputs.mode == 'reply'
-        uses: actions/upload-artifact@v4
-        with:
-          name: reply-result
-          path: /tmp/reply-result/reply.json
-          retention-days: 1
-
-      - name: Sync specs to code
-        if: inputs.mode == 'sync'
+      - name: Run Predictable Code agent
+        if: inputs.mode == 'command'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::warning::ANTHROPIC_API_KEY is not configured. Cannot run sync."
+            echo "::error::ANTHROPIC_API_KEY is not configured."
             exit 1
           fi
-          if [ -z "${{ inputs.pr_number }}" ]; then
-            echo "::error::pr_number is required for mode=sync"
-            exit 1
-          fi
+
           PR_BRANCH=$(curl -s \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/${{ inputs.repository }}/pulls/${{ inputs.pr_number }}" \
             | jq -r '.head.ref')
+
           if [ -z "$PR_BRANCH" ] || [ "$PR_BRANCH" = "null" ]; then
             echo "::error::Could not resolve branch for PR ${{ inputs.pr_number }}"
             exit 1
           fi
+
           git config user.name "predictable-code[bot]"
           git config user.email "predictable-code[bot]@users.noreply.github.com"
           git checkout -b "$PR_BRANCH" --track "origin/$PR_BRANCH" 2>/dev/null \
             || git checkout "$PR_BRANCH"
-          predictable specs sync --verbose
-          if [ -z "$(git status --porcelain)" ]; then
-            echo "No spec changes after sync."
-            exit 0
-          fi
-          git add -A specs/ .predictable-code/specs/ 2>/dev/null || true
-          git commit -m "chore(specs): sync specs to code via Predictable Code"
-          git push origin "$PR_BRANCH"
+
+          mkdir -p /tmp/command-result
+          predictable task \
+            --comment "${{ inputs.comment }}" \
+            > /tmp/command-result/result.txt
+
+      - name: Upload command result
+        if: inputs.mode == 'command'
+        uses: actions/upload-artifact@v4
+        with:
+          name: command-result
+          path: /tmp/command-result/result.txt
+          retention-days: 1
 
       - name: Check for specs directory
         id: check_specs
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync'
+        if: inputs.mode != 'init' && inputs.mode != 'command'
         run: |
           if [ -d ".predictable-code" ]; then
             echo "has_specs=true" >> $GITHUB_OUTPUT
@@ -259,7 +174,7 @@ jobs:
 
       - name: Compile and verify specs
         id: verify_specs
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync' && steps.check_specs.outputs.has_specs == 'true'
+        if: inputs.mode != 'init' && inputs.mode != 'command' && steps.check_specs.outputs.has_specs == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -278,44 +193,8 @@ jobs:
             "${{ inputs.pr_number }}" "$COMPILE_OUTPUT" "$OUT_OF_SYNC" \
             > /tmp/verify-results/results.json
 
-      - name: Run formal verification and generate SARIF
-        id: sarif_generation
-        if: inputs.mode == 'formalize' && steps.check_specs.outputs.has_specs == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          mkdir -p /tmp/sarif-results
-          SPEC_IDS=$(jq -r '.compiled[]?.specId // empty' /tmp/verify-results/compile.json)
-          if [ -z "$SPEC_IDS" ]; then
-            echo "No specs found for formal verification."
-            echo "has_sarif=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-          SARIF_COUNT=0
-          for SPEC_ID in $SPEC_IDS; do
-            echo "Running verify formalize for spec: $SPEC_ID"
-            SARIF_FILE="/tmp/sarif-results/${SPEC_ID}.sarif"
-            predictable verify formalize "$SPEC_ID" --output-sarif "$SARIF_FILE" 2>&1 || true
-            if [ -f "$SARIF_FILE" ]; then
-              SARIF_COUNT=$((SARIF_COUNT + 1))
-            fi
-          done
-          if [ "$SARIF_COUNT" -gt 0 ]; then
-            echo "has_sarif=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_sarif=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Upload SARIF to GitHub Code Scanning
-        if: inputs.mode == 'formalize' && steps.sarif_generation.outputs.has_sarif == 'true'
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: /tmp/sarif-results
-          category: predictable-code-verification
-
       - name: Save no-specs result
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync' && steps.check_specs.outputs.has_specs == 'false'
+        if: inputs.mode != 'init' && inputs.mode != 'command' && steps.check_specs.outputs.has_specs == 'false'
         run: |
           mkdir -p /tmp/verify-results
           printf '{"pr_number":"%s","has_specs":false}\n' \
@@ -323,7 +202,7 @@ jobs:
             > /tmp/verify-results/results.json
 
       - name: Upload verification results
-        if: inputs.mode != 'init' && inputs.mode != 'reply' && inputs.mode != 'sync' && inputs.pr_number != ''
+        if: inputs.mode != 'init' && inputs.mode != 'command' && inputs.pr_number != ''
         uses: actions/upload-artifact@v4
         with:
           name: verify-results
