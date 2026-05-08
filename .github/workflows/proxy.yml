@@ -79,7 +79,7 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code
           mkdir -p ~/.claude
-          echo '{"hasCompletedOnboarding": true}' > ~/.claude/settings.json
+          echo '{"hasCompletedOnboarding": true, "bypassPermissionsModeAccepted": true}' > ~/.claude/settings.json
 
       - name: Initialize project
         if: inputs.mode == 'init'
