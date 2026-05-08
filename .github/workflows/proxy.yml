@@ -148,6 +148,9 @@ jobs:
           git checkout -b "$PR_BRANCH" --track "origin/$PR_BRANCH" 2>/dev/null \
             || git checkout "$PR_BRANCH"
 
+          # Ensure npm global bin is in PATH so subprocesses (e.g. MCP sync) can find claude
+          export PATH="$(npm root -g)/../bin:$PATH"
+
           mkdir -p /tmp/command-result
           FULL_COMMENT="PR #${{ inputs.pr_number }} in ${{ inputs.repository }}"$'\n\n'"${{ inputs.comment }}"
           predictable task \
