@@ -73,7 +73,7 @@ jobs:
           fi
 
       - name: Install Claude CLI
-        if: inputs.mode == 'init' && steps.check_api_key.outputs.has_key == 'true'
+        if: (inputs.mode == 'init' && steps.check_api_key.outputs.has_key == 'true') || inputs.mode == 'command'
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
