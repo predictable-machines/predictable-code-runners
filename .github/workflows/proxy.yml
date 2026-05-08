@@ -149,8 +149,9 @@ jobs:
             || git checkout "$PR_BRANCH"
 
           mkdir -p /tmp/command-result
+          FULL_COMMENT="PR #${{ inputs.pr_number }} in ${{ inputs.repository }}"$'\n\n'"${{ inputs.comment }}"
           predictable task \
-            --comment "${{ inputs.comment }}" \
+            --comment "$FULL_COMMENT" \
             > /tmp/command-result/result.txt
 
       - name: Upload command result
