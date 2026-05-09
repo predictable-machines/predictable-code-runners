@@ -155,7 +155,15 @@ jobs:
           FULL_COMMENT="PR #${{ inputs.pr_number }} in ${{ inputs.repository }}"$'\n\n'"${{ inputs.comment }}"
           predictable task \
             --comment "$FULL_COMMENT" \
-            > /tmp/command-result/result.txt
+            > /tmp/command-result/result.txt \
+            2> /tmp/command-result/stderr.txt || true
+          if [ ! -s /tmp/command-result/result.txt ]; then
+            STDERR=$(cat /tmp/command-result/stderr.txt 2>/dev/null | head -20)
+            echo "The agent did not produce a result." > /tmp/command-result/result.txt
+            if [ -n "$STDERR" ]; then
+              printf '\n```\n%s\n```' "$STDERR" >> /tmp/command-result/result.txt
+            fi
+          fi
 
       - name: Upload command result
         if: inputs.mode == 'command'
