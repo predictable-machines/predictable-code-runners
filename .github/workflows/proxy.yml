@@ -72,6 +72,12 @@ jobs:
             echo "has_key=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Install Lean toolchain
+        if: inputs.mode == 'command'
+        run: |
+          curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y --no-modify-path
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
       - name: Install Claude CLI
         if: (inputs.mode == 'init' && steps.check_api_key.outputs.has_key == 'true') || inputs.mode == 'command'
         env:
