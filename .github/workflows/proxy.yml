@@ -179,6 +179,8 @@ jobs:
           git add -A
           if ! git diff --cached --quiet; then
             git commit -m "chore: apply predictable changes"
+          fi
+          if ! git diff --quiet HEAD origin/$(git rev-parse --abbrev-ref HEAD) 2>/dev/null; then
             git push origin HEAD
           fi
 
