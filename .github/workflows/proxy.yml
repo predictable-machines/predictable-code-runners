@@ -158,7 +158,7 @@ jobs:
           export PATH="$(npm root -g)/../bin:$PATH"
 
           mkdir -p /tmp/command-result
-          FULL_COMMENT="PR #${{ inputs.pr_number }} in ${{ inputs.repository }}"$'\n\n'"${{ inputs.comment }}"
+          FULL_COMMENT="PR #${{ inputs.pr_number }} in ${{ inputs.repository }}"$'\n\n'"${{ inputs.comment }}"$'\n\n'"When you finish your task, if you modified any files, run: git add -A && git commit -m '<describe what you changed in one line>' before ending your response."
           predictable task \
             --comment "$FULL_COMMENT" \
             > /tmp/command-result/result.txt \
