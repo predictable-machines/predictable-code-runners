@@ -28,7 +28,7 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - name: Checkout repository
@@ -72,6 +72,12 @@ jobs:
             echo "has_key=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Install Lean toolchain
+        if: inputs.mode == 'command'
+        run: |
+          curl https://elan.lean-lang.org/elan-init.sh -sSf | sh -s -- -y --no-modify-path
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
       - name: Install Claude CLI
         if: (inputs.mode == 'init' && steps.check_api_key.outputs.has_key == 'true') || inputs.mode == 'command'
         env:
@@ -79,7 +85,7 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code
           mkdir -p ~/.claude
-          echo '{"hasCompletedOnboarding": true}' > ~/.claude/settings.json
+          echo '{"hasCompletedOnboarding": true, "bypassPermissionsModeAccepted": true}' > ~/.claude/settings.json
 
       - name: Initialize project
         if: inputs.mode == 'init'
@@ -148,11 +154,22 @@ jobs:
           git checkout -b "$PR_BRANCH" --track "origin/$PR_BRANCH" 2>/dev/null \
             || git checkout "$PR_BRANCH"
 
+          # Ensure npm global bin is in PATH so subprocesses (e.g. MCP sync) can find claude
+          export PATH="$(npm root -g)/../bin:$PATH"
+
           mkdir -p /tmp/command-result
           FULL_COMMENT="PR #${{ inputs.pr_number }} in ${{ inputs.repository }}"$'\n\n'"${{ inputs.comment }}"
           predictable task \
             --comment "$FULL_COMMENT" \
-            > /tmp/command-result/result.txt
+            > /tmp/command-result/result.txt \
+            2> /tmp/command-result/stderr.txt || true
+          if [ ! -s /tmp/command-result/result.txt ]; then
+            STDERR=$(cat /tmp/command-result/stderr.txt 2>/dev/null | head -20)
+            echo "The agent did not produce a result." > /tmp/command-result/result.txt
+            if [ -n "$STDERR" ]; then
+              printf '\n```\n%s\n```' "$STDERR" >> /tmp/command-result/result.txt
+            fi
+          fi
 
       - name: Upload command result
         if: inputs.mode == 'command'
